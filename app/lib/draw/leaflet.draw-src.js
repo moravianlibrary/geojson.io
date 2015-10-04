@@ -1275,12 +1275,15 @@ L.Polyline.addInitHook(function () {
 		return;
 	}
 
-	if (L.Edit.Poly) {
+	if (L.Draw.Topology.Handler.Polyline) {
+		this.editing = new L.Draw.Topology.Handler.Polyline(this);
+	} else if (L.Handler.PolylineSnap) {
+		this.editing = new L.Handler.PolylineSnap(this);
+	} else if (L.Edit.Poly) {
 		this.editing = new L.Edit.Poly(this);
-
-		if (this.options.editable) {
-			this.editing.enable();
-		}
+	}
+	if (this.options.editable) {
+		this.editing.enable();
 	}
 
 	this.on('add', function () {
@@ -2700,6 +2703,9 @@ L.EditToolbar.Edit = L.Handler.extend({
 			layer.dragging.enable();
 			layer.on('dragend', this._onMarkerDragEnd);
 		} else {
+			if (layer.editing instanceof L.Handler.PolylineSnap) {
+				layer.editing.addGuideLayer(this._featureGroup);
+			}
 			layer.editing.enable();
 		}
 	},

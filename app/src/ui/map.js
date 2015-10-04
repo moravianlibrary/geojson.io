@@ -39,8 +39,8 @@ module.exports = function(context, readonly) {
               edit: { featureGroup: context.mapLayer },
               draw: {
                   circle: false,
-                  polyline: { metric: (navigator.language !== 'en-us' && navigator.language !== 'en-US') },
-                  polygon: { metric: (navigator.language !== 'en-us' && navigator.language !== 'en-US') },
+                  polyline: { metric: (navigator.language !== 'en-us' && navigator.language !== 'en-US'), guideLayers: [context.mapLayer] },
+                  polygon: { metric: (navigator.language !== 'en-us' && navigator.language !== 'en-US'), guideLayers: [context.mapLayer], snapDistance: 5 },
                   marker: {
                       icon: L.mapbox.marker.icon({})
                   }
