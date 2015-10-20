@@ -2,6 +2,7 @@ require('qs-hash');
 require('../lib/custom_hash.js');
 
 var popup = require('../lib/popup'),
+    grid = require('../lib/leaflet.grid'),
     escape = require('escape-html'),
     LGeo = require('leaflet-geodesy'),
     writable = false,
@@ -47,6 +48,10 @@ module.exports = function(context, readonly) {
               }
           }).addTo(context.map);
 
+          context.drawGrid = new grid.Control({
+            position: 'topright'
+          }).addTo(context.map);
+
           context.map
             .on('draw:edited', update)
             .on('draw:deleted', update);
@@ -69,7 +74,14 @@ module.exports = function(context, readonly) {
         });
 
         function created(e) {
-            context.mapLayer.addLayer(e.layer);
+            if (e.layer) {
+              context.mapLayer.addLayer(e.layer);
+            }
+            if (e.layers) {
+              e.layers.forEach(function(l) {
+                context.mapLayer.addLayer(l);
+              });
+            }
             update();
         }
     }

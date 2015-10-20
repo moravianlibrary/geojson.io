@@ -1,0 +1,22 @@
+.leaflet-control-grid {
+  background-color: white;
+  border: 1px solid grey;
+}
+
+.leaflet-control-grid-action {
+  background-image: url('/img/grid.png');
+  background-repeat: no-repeat;
+  background-position: center;
+  width: 16px;
+  height: 16px;
+  padding: 13px;
+  cursor: pointer;
+}
+
+.leaflet-control-grid-action:hover {
+  background-color: #F2F2F2;
+}
+
+.ui-autocomplete {
+  z-index: 99999 !important;
+}

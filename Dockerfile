@@ -10,7 +10,9 @@ RUN apt-get update -y && \
       libssl-dev \
       python \
       git \
-      curl
+      curl \
+      pkg-config \
+      libcairo2-dev
 
 ENV NVM_DIR /usr/local/nvm
 ENV NODE_VERSION 0.10.40
