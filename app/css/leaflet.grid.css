@@ -20,3 +20,11 @@
 .ui-autocomplete {
   z-index: 99999 !important;
 }
+
+#bttn-proj {
+  position: absolute;
+  top: 15px;
+  right: 60px;
+  color: #0091C2;
+  cursor: pointer;
+}

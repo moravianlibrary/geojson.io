@@ -30,6 +30,7 @@ module.exports = {
       this._lbCoor = [-90, -180];
       this._rbCoor = [-90, 180];
       this._excludedRects = new Set();
+      this._proj = 4326;
     },
 
     onAdd: function(map) {
@@ -51,7 +52,8 @@ module.exports = {
                 + '<label for="input-cols">Cols:</label>'
                 + '<input type="number" id="input-cols" value="' + this._cols + '">'
                 + '<label for="input-rows">Rows:</label>'
-                + '<input type="number" id="input-rows" value="' + this._rows + '">';
+                + '<input type="number" id="input-rows" value="' + this._rows + '">'
+                + '<div id="bttn-proj">EPSG: ' + this._proj + '</div>';
 
 
       vexDialog.open({
@@ -197,16 +199,22 @@ module.exports = {
     initDialog: function(dialogContent) {
       this._inputCols = document.getElementById('input-cols');
       this._inputRows = document.getElementById('input-rows');
+      var bttnProj = document.getElementById('bttn-proj');
 
       this._cols = this._inputCols.value;
       this._rows = this._inputRows.value;
 
+
       L.DomEvent
         .on(this._inputCols, 'change', this.onColsChanged, this)
-        .on(this._inputRows, 'change', this.onRowsChanged, this);
+        .on(this._inputRows, 'change', this.onRowsChanged, this)
+        .on(bttnProj, 'click', this.onBttnProjClick, this);
     },
 
-    confirmDialog: function() {
+    confirmDialog: function(data) {
+      if (data === false) {
+        return;
+      }
       var left = this._ltCoor[1],
           top = this._ltCoor[0],
           xstep = (this._rbCoor[1] - this._ltCoor[1]) / this._cols,
@@ -223,11 +231,67 @@ module.exports = {
           var rt = L.latLng(top - ystep*y, left + xstep*(x+1));
           var rb = L.latLng(top - ystep*(y+1), left + xstep*(x+1));
           var lb = L.latLng(top - ystep*(y+1), left + xstep*x);
-          var poly = L.polygon([lt, rt, rb, lb]);
-          polygons.push(poly);
+          polygons.push(lt, rt, rb, lb);
         }
       }
-      this._map.fire('draw:created', { layers: polygons});
+      this.transformCoors(polygons, function(coors) {
+        var polygons = [];
+        for (var i = 0; i < coors.length;) {
+          pcoors = [];
+          for (var j = 0; j < 4; i++,j++) {
+            var coor = coors[i];
+            pcoors.push(L.latLng(coor.y, coor.x));
+          }
+          polygons.push(L.polygon(pcoors));
+        }
+        this._map.fire('draw:created', { layers: polygons});
+      });
+    },
+
+    transformCoors: function(coors, callback, result) {
+      result = result || [];
+      var batch = coors.slice(0, 20);
+      var rest = coors.slice(20, coors.length);
+
+      var callbackInternal = function(r) {
+        result = result.concat(r);
+        if (rest.length) {
+          this.transformCoors.call(this, rest, callback, result);
+        } else {
+          callback.call(this, result);
+        }
+      };
+
+      this.transformCoorsInternal(batch, callbackInternal.bind(this));
+    },
+
+    transformCoorsInternal: function(coors, callback) {
+      var _this = this;
+      var out = [];
+      coors.forEach(function (coor) {
+        out.push('' + coor.lng + ',' + coor.lat);
+      });
+      out = out.join(';');
+      $.ajax({
+        url: 'http://epsg.io/trans',
+        jsonp: 'callback',
+        dataType: 'jsonp',
+        data: {
+          data: out,
+          s_srs: this._proj,
+          t_srs: 4326
+        },
+        success: function(response) {
+          callback.call(_this, response);
+        },
+        error: function(xhr, msg, exception) {
+          console.error(xhr);
+          console.error(msg);
+          console.error(exception);
+          alert(msg);
+          callback(null);
+        }
+      });
     },
 
     onColsChanged: function() {
@@ -242,29 +306,23 @@ module.exports = {
       this.updateCanvas();
     },
 
-    showCoorsDialog: function(dataModel) {
-      var _this = this;
-      var input = '<label for="input-north">Severní souřadnice:<label><input type="text" name="north" id="input-north">'
-                + '<label for="input-east">Východní souřadnice:</label><input type="text" name="east" id="input-east">';
+    onProjChanged: function(proj) {
+      this._proj = proj;
+      document.getElementById('bttn-proj').innerHTML = 'EPSG: ' + proj;
+    },
 
+    onBttnProjClick: function(e) {
       vexDialog.open({
-        message: 'Súradnice',
-        input: input,
-        afterOpen: this.initCoorsDialog.bind(this),
-        callback: function(data) {
-          _this.confirmCoorsDialog.call(_this, data, dataModel);
-        }
+        message: 'Projekce',
+        afterOpen: this.initProjDialog.bind(this),
+        input: '<input type="text" name="proj" id="input-proj">',
+        callback: this.confirmProjDialog.bind(this)
       });
     },
 
-    initCoorsDialog: function() {
-      var inputNorth = document.getElementById('input-north'),
-          inputEast  = document.getElementById('input-east');
-          //inputProj  = document.getElementById('input-proj');
-
-      inputNorth.addEventListener('keydown', this.onCoorsKeyEvent);
-      inputEast.addEventListener('keydown', this.onCoorsKeyEvent);
-      /*$(inputProj).autocomplete({
+    initProjDialog: function() {
+      var inputProj  = document.getElementById('input-proj');
+      $(inputProj).autocomplete({
         source: function(request, response) {
           $.ajax({
             url: 'http://epsg.io',
@@ -293,107 +351,135 @@ module.exports = {
             }
           });
         }
-      });*/
+      });
+    },
+
+    confirmProjDialog: function(data) {
+      if (data) {
+        var projParser = new RegExp(/^(\d+).*/);
+        this.onProjChanged(projParser.exec(data.proj)[1]);
+      }
+    },
+
+    showCoorsDialog: function(dataModel) {
+      var _this = this;
+      var input = '<label for="input-north">Severní souřadnice:<label><input type="text" name="north" id="input-north">'
+                + '<label for="input-east">Východní souřadnice:</label><input type="text" name="east" id="input-east">';
+
+      vexDialog.open({
+        message: 'Súradnice',
+        input: input,
+        afterOpen: this.initCoorsDialog.bind(this),
+        callback: function(data) {
+          _this.confirmCoorsDialog.call(_this, data, dataModel);
+        }
+      });
+    },
+
+    initCoorsDialog: function() {
+      var inputNorth = document.getElementById('input-north'),
+          inputEast  = document.getElementById('input-east');
+
+      inputNorth.addEventListener('keydown', this.onCoorsKeyEvent);
+      inputEast.addEventListener('keydown', this.onCoorsKeyEvent);
     },
 
     confirmCoorsDialog: function(data, dataModel) {
       if (data) {
-        var projParser = new RegExp(/^(\d+).*/);
         dataModel[0] = this.coorStrToNum(data.north);
         dataModel[1] = this.coorStrToNum(data.east);
-        //dataModel[2] = projParser.exec(data.proj)[1];
         this.updateCanvas();
       }
     },
 
-    // onCoorsKeyEvent: function(e) {
-    //   var carret = [e.target.selectionStart, e.target.selectionEnd];
-    //   var start = e.target.value.substring(0, carret[0]);
-    //   var end = e.target.value.substring(carret[1]);
-    //
-    //   var contains = function(x, y) { return x.indexOf(y) > -1; }
-    //   var isEmpty = function(x) { return !x || 0 === x.length };
-    //   var isDigit = function(x) { return (x > '0' && x < '9') || x == '.' || x == ',' };
-    //
-    //   var startContainsDegree = contains(start, '°');
-    //   var startContainsMinute = contains(start, "'");
-    //   var startContainsSecond = contains(start, '"');
-    //   var startIsEmpty = isEmpty(start);
-    //
-    //   var endContainsMinus = contains(end, '-');
-    //   var endContainsDegree = contains(end, '°');
-    //   var endContainsMinute = contains(end, "'");
-    //   var endContainsSecond = contains(end, '"');
-    //
-    //   var isMinus = e.key == '-';
-    //   var isNumber = e.key >= '0' && e.key <= '9';
-    //   var isDecimalSep = e.key == '.' || e.key == ',';
-    //   var isSpace = e.key == ' ';
-    //   var isNavigation = e.keyCode == 37 /* LEFT */
-    //     || e.keyCode == 39 /* RIGHT */
-    //     || e.keyCode == 36 /* HOME */
-    //     || e.keyCode == 35; /* END */
-    //   var isTab = e.keyCode == 9;
-    //   var isRemove = e.keyCode == 8 /* BACKSPACE */
-    //     || e.keyCode == 46; /* DELETE */
-    //   var isCopyPaste = (e.ctrlKey && e.keyCode == 67 /* C */)
-    //     || (e.ctrlKey && e.keyCode == 86 /* V */);
-    //   var isMarkAll = e.ctrlKey && e.keyCode == 65 /* A */;
-    //
-    //   if (isNavigation || isTab || isRemove || isCopyPaste || isMarkAll) {
-    //     // Preserves default behavior
-    //     return;
-    //   }
-    //
-    //   if (startContainsSecond) {
-    //     // we do not allow adding any new character
-    //     e.preventDefault();
-    //     return;
-    //   }
-    //
-    //   if (isMinus && startIsEmpty && !endContainsMinus) {
-    //     // Preserves default behavior
-    //     return;
-    //   } else if (isNumber) {
-    //     // Preserves default behavior
-    //     return;
-    //   } else if (isDecimalSep) {
-    //     var i = carret[0];
-    //     var j = carret[0];
-    //     var value = e.target.value;
-    //
-    //     while ((i > 0 && isDigit(value[i])) || (i == value.length)) i--;
-    //     while (j < value.length && isDigit(value[j])) j++;
-    //
-    //     if (!isDigit(value[i])) i++;
-    //     if (!isDigit(value[j])) j--;
-    //
-    //     var number = value.substring(i, j+1);
-    //
-    //     if (!contains(number, '.') && !contains(number, ',')) {
-    //       e.target.value = start + '.' + end;
-    //     }
-    //
-    //   } else if (isSpace) {
-    //     var changed = false;
-    //     if (startContainsMinute && !endContainsSecond) {
-    //       e.target.value = start + '"' + end;
-    //       changed = true;
-    //     } else if (startContainsDegree && !startContainsMinute && !endContainsMinute) {
-    //       e.target.value = start + "'" + end;
-    //       changed = true;
-    //     } else if (!startContainsDegree && !endContainsDegree) {
-    //       e.target.value = start + '°' + end;
-    //       changed = true;
-    //     }
-    //
-    //     if (changed) {
-    //       e.target.selectionStart = carret[0] + 1;
-    //       e.target.selectionEnd = carret[0] + 1;
-    //     }
-    //   }
-    //   e.preventDefault();
-    // },
+    onCoorsKeyEvent: function(e) {
+      var carret = [e.target.selectionStart, e.target.selectionEnd];
+      var start = e.target.value.substring(0, carret[0]);
+      var end = e.target.value.substring(carret[1]);
+
+      var contains = function(x, y) { return x.indexOf(y) > -1; }
+      var isEmpty = function(x) { return !x || 0 === x.length };
+      var isDigit = function(x) { return (x > '0' && x < '9') || x == '.' || x == ',' };
+
+      var startContainsDegree = contains(start, '°');
+      var startContainsMinute = contains(start, "'");
+      var startContainsSecond = contains(start, '"');
+      var startIsEmpty = isEmpty(start);
+
+      var endContainsMinus = contains(end, '-');
+      var endContainsDegree = contains(end, '°');
+      var endContainsMinute = contains(end, "'");
+      var endContainsSecond = contains(end, '"');
+
+      var isMinus = e.key == '-';
+      var isNumber = e.key >= '0' && e.key <= '9';
+      var isDecimalSep = e.key == '.' || e.key == ',';
+      var isSpace = e.key == ' ';
+      var isNavigation = e.keyCode == 37 /* LEFT */
+        || e.keyCode == 39 /* RIGHT */
+        || e.keyCode == 36 /* HOME */
+        || e.keyCode == 35; /* END */
+      var isTab = e.keyCode == 9;
+      var isRemove = e.keyCode == 8 /* BACKSPACE */
+        || e.keyCode == 46; /* DELETE */
+      var isCopyPaste = (e.ctrlKey && e.keyCode == 67 /* C */)
+        || (e.ctrlKey && e.keyCode == 86 /* V */);
+      var isMarkAll = e.ctrlKey && e.keyCode == 65 /* A */;
+
+      if (isNavigation || isTab || isRemove || isCopyPaste || isMarkAll) {
+        // Preserves default behavior
+        return;
+      }
+
+      if (startContainsSecond) {
+        // we do not allow adding any new character
+        e.preventDefault();
+        return;
+      }
+
+      if (isMinus && startIsEmpty && !endContainsMinus) {
+        // Preserves default behavior
+        return;
+      } else if (isNumber) {
+        // Preserves default behavior
+        return;
+      } else if (isDecimalSep) {
+        var i = carret[0];
+        var j = carret[0];
+        var value = e.target.value;
+
+        while ((i > 0 && isDigit(value[i])) || (i == value.length)) i--;
+        while (j < value.length && isDigit(value[j])) j++;
+
+        if (!isDigit(value[i])) i++;
+        if (!isDigit(value[j])) j--;
+
+        var number = value.substring(i, j+1);
+
+        if (!contains(number, '.') && !contains(number, ',')) {
+          e.target.value = start + '.' + end;
+        }
+
+      } else if (isSpace) {
+        var changed = false;
+        if (startContainsMinute && !endContainsSecond) {
+          e.target.value = start + '"' + end;
+          changed = true;
+        } else if (startContainsDegree && !startContainsMinute && !endContainsMinute) {
+          e.target.value = start + "'" + end;
+          changed = true;
+        } else if (!startContainsDegree && !endContainsDegree) {
+          e.target.value = start + '°' + end;
+          changed = true;
+        }
+
+        if (changed) {
+          e.target.selectionStart = carret[0] + 1;
+          e.target.selectionEnd = carret[0] + 1;
+        }
+      }
+      e.preventDefault();
+    },
 
     coorStrToNum: function(coor) {
       var re = new RegExp(/^\s*(-?\d+(\.\d+)?)\s*([°|\s]\s*(\d+(\.\d+)?)?)?\s*(['|\s]\s*(\d+(\.\d+)?)?)?\s*"?\s*$/);
