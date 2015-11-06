@@ -6,7 +6,6 @@ var popup = require('../lib/popup'),
     escape = require('escape-html'),
     LGeo = require('leaflet-geodesy'),
     writable = false,
-    showStyle = true,
     makiValues = require('../../data/maki.json'),
     maki = '';
 
@@ -33,6 +32,7 @@ module.exports = function(context, readonly) {
         L.hash(context.map);
 
         context.mapLayer = L.featureGroup().addTo(context.map);
+        context.labelLayer = L.layerGroup().addTo(context.map);
 
         if (writable) {
           context.drawControl = new L.Control.Draw({
@@ -65,12 +65,12 @@ module.exports = function(context, readonly) {
         context.map.infoControl.addInfo('<a target="_blank" href="http://geojson.io/about.html">About</a>');
 
         function update() {
-            geojsonToLayer(context.mapLayer.toGeoJSON(), context.mapLayer);
+            geojsonToLayer(context.mapLayer.toGeoJSON(), context.mapLayer, context.labelLayer);
             context.data.set({map: layerToGeoJSON(context.mapLayer)}, 'map');
         }
 
         context.dispatch.on('change.map', function() {
-            geojsonToLayer(context.data.get('map'), context.mapLayer);
+            geojsonToLayer(context.data.get('map'), context.mapLayer, context.labelLayer);
         });
 
         function created(e) {
@@ -99,8 +99,9 @@ module.exports = function(context, readonly) {
     return map;
 };
 
-function geojsonToLayer(geojson, layer) {
-    layer.clearLayers();
+function geojsonToLayer(geojson, mapLayer, labelLayer) {
+    mapLayer.clearLayers();
+    labelLayer.clearLayers();
     L.geoJson(geojson, {
         style: L.mapbox.simplestyle.style,
         pointToLayer: function(feature, latlon) {
@@ -110,7 +111,8 @@ function geojsonToLayer(geojson, layer) {
     }).eachLayer(add);
     function add(l) {
         bindPopup(l);
-        l.addTo(layer);
+        bindLabel(l, labelLayer);
+        l.addTo(mapLayer);
     }
 }
 
@@ -132,72 +134,9 @@ function bindPopup(l) {
 
     if (!Object.keys(properties).length) properties = { '': '' };
 
-    if (l.feature && l.feature.geometry && writable) {
-        if (l.feature.geometry.type === 'Point' || l.feature.geometry.type === 'MultiPoint') {
-            if (!('marker-color' in properties)) {
-                table += '<tr class="style-row"><th><input type="text" value="marker-color"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                    '<td><input type="color" value="#7E7E7E"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-            }
-            if (!('marker-size' in properties)) {
-                table += '<tr class="style-row"><th><input type="text" value="marker-size"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                    '<td><input type="text" list="marker-size" value="medium"' + (!writable ? ' readonly' : '') + ' /><datalist id="marker-size"><option value="small"><option value="medium"><option value="large"></datalist></td></tr>';
-            }
-            if (!('marker-symbol' in properties)) {
-                table += '<tr class="style-row"><th><input type="text" value="marker-symbol"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                    '<td><input type="text" list="marker-symbol" value=""' + (!writable ? ' readonly' : '') + ' /><datalist id="marker-symbol">' + maki + '</datalist></td></tr>';
-            }
-        }
-        if (l.feature.geometry.type === 'LineString' || l.feature.geometry.type === 'MultiLineString' || l.feature.geometry.type === 'Polygon' || l.feature.geometry.type === 'MultiPolygon') {
-            if (!('stroke' in properties)) {
-                table += '<tr class="style-row"><th><input type="text" value="stroke"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                    '<td><input type="color" value="#555555"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-            }
-            if (!('stroke-width' in properties)) {
-                table += '<tr class="style-row"><th><input type="text" value="stroke-width"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                    '<td><input type="number" min="0" step="0.1" value="2"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-            }
-            if (!('stroke-opacity' in properties)) {
-                table += '<tr class="style-row"><th><input type="text" value="stroke-opacity"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                    '<td><input type="number" min="0" max="1" step="0.1" value="1"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-            }
-        }
-        if (l.feature.geometry.type === 'Polygon' || l.feature.geometry.type === 'MultiPolygon') {
-            if (!('fill' in properties)) {
-                table += '<tr class="style-row"><th><input type="text" value="fill"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                    '<td><input type="color" value="#555555"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-            }
-            if (!('fill-opacity' in properties)) {
-                table += '<tr class="style-row"><th><input type="text" value="fill-opacity"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                    '<td><input type="number" min="0" max="1" step="0.1" value="0.5"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-            }
-        }
-    }
-
     for (var key in properties) {
-        if ((key == 'marker-color' || key == 'stroke' || key == 'fill') && writable) {
-            table += '<tr class="style-row"><th><input type="text" value="' + key + '"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                '<td><input type="color" value="' + properties[key] + '"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-        }
-        else if (key == 'marker-size' && writable) {
-            table += '<tr class="style-row"><th><input type="text" value="' + key + '"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                '<td><input type="text" list="marker-size" value="' + properties[key] + '"' + (!writable ? ' readonly' : '') + ' /><datalist id="marker-size"><option value="small"><option value="medium"><option value="large"></datalist></td></tr>';
-        }
-        else if (key == 'marker-symbol' && writable) {
-            table += '<tr class="style-row"><th><input type="text" value="' + key + '"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                '<td><input type="text" list="marker-symbol" value="' + properties[key] + '"' + (!writable ? ' readonly' : '') + ' /><datalist id="marker-symbol">' + maki + '</datalist></td></tr>';
-        }
-        else if (key == 'stroke-width' && writable) {
-            table += '<tr class="style-row"><th><input type="text" value="' + key + '"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                '<td><input type="number" min="0" step="0.1" value="' + properties[key] + '"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-        }
-        else if ((key == 'stroke-opacity' || key == 'fill-opacity') && writable) {
-            table += '<tr class="style-row"><th><input type="text" value="' + key + '"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                '<td><input type="number" min="0" max="1" step="0.1" value="' + properties[key] + '"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-        }
-        else {
-            table += '<tr><th><input type="text" value="' + key + '"' + (!writable ? ' readonly' : '') + ' /></th>' +
-                '<td><input type="text" value="' + properties[key] + '"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
-        }
+        table += '<tr><th><input type="text" value="' + key + '"' + (!writable ? ' readonly' : '') + ' /></th>' +
+            '<td><input type="text" value="' + properties[key] + '"' + (!writable ? ' readonly' : '') + ' /></td></tr>';
     }
 
     if (l.feature && l.feature.geometry) {
@@ -231,8 +170,7 @@ function bindPopup(l) {
                         '<label class="keyline-top keyline-right tab-toggle pad0 pin-bottomleft z10 center col6" for="properties">Properties</label>' +
                         '<div class="space-bottom1 col12 content">' +
                             '<table class="space-bottom0 marker-properties">' + table + '</table>' +
-                            (writable ? '<div class="add-row-button add fl col3"><span class="icon-plus"> Add row</div>' +
-                            '<div class="fl text-right col9"><input type="checkbox" id="show-style" name="show-style" value="true" checked><label for="show-style">Show style properties</label></div>' : '') +
+                            (writable ? '<div class="add-row-button add fl col3"><span class="icon-plus"> Add row</div>' : '') +
                         '</div>' +
                     '</div>' +
                     '<div class="space-bottom2 tab col12">' +
@@ -259,20 +197,23 @@ function bindPopup(l) {
         autoPanPadding: [5, 45],
         className: 'geojsonio-feature'
     }, l).setContent(content));
+}
 
-    l.on('popupopen', function(e){
-        if (showStyle === false) {
-            d3.select('#show-style').property('checked', false);
-              d3.selectAll('.style-row').style('display','none');
-        }
-        d3.select('#show-style').on('click', function() {
-            if (this.checked) {
-                showStyle = true;
-                d3.selectAll('.style-row').style('display','');
-            } else {
-                showStyle = false;
-                d3.selectAll('.style-row').style('display','none');
-            }
-        });
-    });
+function bindLabel(l, layer) {
+  console.log('bindLabel');
+  var props = JSON.parse(JSON.stringify(l.toGeoJSON().properties)),
+      properties = {};
+
+  // Steer clear of XSS
+  for (var k in props) {
+      var e = escape(k);
+      properties[e] = escape(props[k]);
+  }
+
+  if (properties['ID']) {
+    var label = new L.Label({direction: 'center'});
+    label.setContent(properties['ID']);
+    label.setLatLng(l.getBounds().getCenter());
+    layer.addLayer(label);
+  }
 }

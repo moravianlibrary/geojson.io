@@ -9,15 +9,18 @@
   <title>geojson.io</title>
   <link href='lib/draw/leaflet.draw.css' rel='stylesheet' />
   <link href='lib/codemirror/lib/codemirror.css' rel='stylesheet' />
+  <link href='lib/label/dist/leaflet.label.css' rel='stylesheet' />
   <link href='css/base.css' rel='stylesheet' />
   <link href='css/marker.css' rel='stylesheet' />
   <link href='css/github_browse.css' rel='stylesheet' />
   <link href='css/site.css' rel='stylesheet' />
   <link href='css/theme.css' rel='stylesheet' />
+  <link href='css/ui.css' rel='stylesheet' />
   <link href='css/leaflet.grid.css' rel='stylesheet' />
   <link href='node_modules/vex-js/css/vex.css' rel='stylesheet' />
   <link href='node_modules/vex-js/css/vex-theme-os.css' rel='stylesheet' />
   <link href='node_modules/jquery-ui/themes/smoothness/jquery-ui.css' rel='stylesheet' />
+  <link href='node_modules/jstree/dist/themes/default/style.min.css' rel='stylesheet' />
   <link rel='icon' type='image/x-icon' href='/img/favicon.png' />
   <meta name='author' content='MapBox' />
   <meta name='description' content='simply edit geojson map data' />
@@ -43,6 +46,8 @@
 <body id='geojsonio-body'>
 
 <div class='geojsonio'></div>
+
+<div id='loading'></div>
 
 <script src='dist/delegate.js'></script>
 <script src='dist/lib.js'></script>

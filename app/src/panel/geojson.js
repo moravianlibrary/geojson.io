@@ -1,23 +1,15 @@
 var validate = require('../lib/validate'),
-    zoomextent = require('../lib/zoomextent'),
-    saver = require('../ui/saver.js');
+    zoomextent = require('../lib/zoomextent');
 
-module.exports = function(context) {
+module.exports = function(context, d) {
 
     CodeMirror.keyMap.tabSpace = {
         Tab: function(cm) {
             var spaces = new Array(cm.getOption('indentUnit') + 1).join(' ');
             cm.replaceSelection(spaces, 'end', '+input');
         },
-        'Ctrl-S': saveAction,
-        'Cmd-S': saveAction,
         fallthrough: ['default']
     };
-
-    function saveAction() {
-        saver(context);
-        return false;
-    }
 
     function render(selection) {
         var textarea = selection
@@ -36,12 +28,17 @@ module.exports = function(context) {
         });
 
         editor.on('change', validate(changeValidated));
+        editor.on('change', updateContent);
 
         function changeValidated(err, data, zoom) {
             if (!err) {
               context.data.set({map: data}, 'json');
               if (zoom) zoomextent(context);
             }
+        }
+
+        function updateContent() {
+          d.content = editor.getValue();
         }
 
         context.dispatch.on('change.json', function(event) {
@@ -52,7 +49,8 @@ module.exports = function(context) {
             }
         });
 
-        editor.setValue(JSON.stringify(context.data.get('map'), null, 2));
+        var data = d.content ? JSON.parse(d.content) : context.data.get('map');
+        editor.setValue(JSON.stringify(data, null, 2));
     }
 
     render.off = function() {

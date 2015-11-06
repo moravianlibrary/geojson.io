@@ -29,11 +29,14 @@ ENV PATH      $NVM_DIR/v$NODE_VERSION/bin:$PATH
 
 RUN npm install geojson-extent
 RUN npm install -g serve
+RUN npm install -g jake
+RUN npm install jshint
 
 # build
 RUN mkdir /build
 COPY app /build
 RUN cd /build && \
+    npm link local_packages/github-api && \
     npm install && \
     make
 

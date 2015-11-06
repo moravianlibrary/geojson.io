@@ -1,130 +1,286 @@
-module.exports.save = save;
-module.exports.load = load;
-module.exports.loadRaw = loadRaw;
+var GitHub = require('github-api');
 
-var config = require('../config.js')(location.hostname);
-var githubBase = config.GithubAPI ? config.GithubAPI + '/api/v3': 'https://api.github.com';
+module.exports = function(context, config) {
 
-function save(context, callback) {
-    var source = context.data.get('source'),
-        meta = context.data.get('meta'),
-        newpath = context.data.get('newpath'),
-        name = (meta && meta.name) || 'map.geojson',
-        map = context.data.get('map');
+  config = config || {};
+  var username = config.username || 'moravianlibrary';
+  var reponame = config.reponame || 'mapseries';
+  var workBranch = config.workBranch || 'work';
 
-    if (navigator.appVersion.indexOf('MSIE 9') !== -1 || !window.XMLHttpRequest) {
-        return alert('Sorry, saving and sharing is not supported in IE9 and lower. ' +
-            'Please use a modern browser to enjoy the full featureset of geojson.io');
+  var github = null;
+  var upstream = null;
+  var origin = null;
+
+  function getGitHub() {
+    if (github) {
+      return github;
     }
+    github = new GitHub({
+      token: context.storage.get('github_token'),
+      auth: 'oauth'
+    });
 
-    if (!localStorage.github_token) {
-        return alert('You need to log in with GitHub to commit changes');
-    }
-
-    context.repo.details(onrepo);
-
-    function onrepo(err, repo) {
-        var commitMessage,
-            endpoint,
-            method = 'POST',
-            files = {};
-
-        if (!err && repo.permissions.push) {
-            commitMessage = context.commitMessage || prompt('Commit message:');
-            if (!commitMessage) return;
-
-            endpoint = source.url;
-            method = 'PUT';
-            data = {
-                message: commitMessage,
-                branch: meta.branch,
-                content: Base64.toBase64(JSON.stringify(map, null, 2))
-            };
-
-            // creating a file
-            if (newpath) {
-                data.path = newpath;
-                context.data.set({ newpath: null });
-            }
-
-            // updating a file
-            if (source.sha) {
-                data.sha = source.sha;
-            }
-        } else {
-            endpoint = githubBase + '/gists';
-            files[name] = { content: JSON.stringify(map, null, 2) };
-            data = { files: files };
+    if (!context.storage.get('github_username')) {
+      context.user.details(function(err, d) {
+        if (err) {
+          console.error(err);
+          return;
         }
-
-        context.user.signXHR(d3.json(endpoint))
-            .on('load', function(data) {
-                callback(null, data);
-            })
-            .on('error', function(err) {
-                var message,
-                    url = /(http:\/\/\S*)/g;
-
-                try {
-                    message = JSON.parse(err.responseText).message
-                        .replace(url, '<a href="$&">$&</a>');
-                } catch(e) {
-                    message = 'Sorry, an error occurred.';
-                }
-
-                callback(message);
-            })
-            .send(method, JSON.stringify(data));
+        context.storage.set('github_username', d.login);
+      });
     }
-}
 
-function parseGitHubId(id) {
-    var parts = id.split('/');
-    return {
-        user: parts[0],
-        repo: parts[1],
-        mode: parts[2],
-        branch: parts[3],
-        file: parts.slice(4).join('/')
-    };
-}
+    return github;
+  }
 
-function load(parts, context, callback) {
-    context.user.signXHR(d3.json(fileUrl(parts)))
-        .on('load', onLoad)
-        .on('error', onError)
-        .get();
-
-    function onLoad(file) {
-        callback(null, file);
+  function getUpstream() {
+    if (upstream) {
+      return upstream;
     }
-    function onError(err) { callback(err, null); }
-}
+    var github = getGitHub();
+    upstream = github.getRepo(username, reponame);
+    return upstream;
+  }
 
-function loadRaw(parts, sha, context, callback) {
-    context.user.signXHR(d3.text(shaUrl(parts, sha)))
-        .on('load', onLoad)
-        .on('error', onError)
-        .header('Accept', 'application/vnd.github.raw')
-        .get();
-
-    function onLoad(file) {
-        callback(null, file);
+  function getOrigin() {
+    if (origin) {
+      return origin;
     }
-    function onError(err) { callback(err, null); }
-}
+    var github = getGitHub();
+    origin = github.getRepo(context.storage.get('github_username'), reponame);
+    return origin;
+  }
 
-function fileUrl(parts) {
-    return githubBase + '/repos/' +
-        parts.user +
-        '/' + parts.repo +
-        '/contents/' + parts.path +
-        '?ref=' + parts.branch;
-}
+  function hasFork(callback) {
+    var repo = getOrigin();
+    repo.contents('master', null, function(err) {
+      callback.call(this, err ? false : true);
+    });
+  }
 
-function shaUrl(parts, sha) {
-    return githubBase + '/repos/' +
-        parts.user +
-        '/' + parts.repo +
-        '/git/blobs/' + sha;
+  function doFork(callback) {
+    var timer = null;
+    timer = window.setInterval(function() {
+      hasFork(function(result) {
+        if (result) {
+          window.clearInterval(timer);
+          callback.call(this);
+        }
+      });
+    }, 1000);
+
+    var repo = getUpstream();
+    repo.fork(function(err) {
+      if (err) {
+        console.error(err);
+        window.clearInterval(timer);
+        callback.call(this, err);
+      }
+    });
+  }
+
+  function fork(callback) {
+    doFork(function() {
+      var repo = getOrigin();
+      repo.branch('master', workBranch, function(err) {
+        if (err) {
+          console.error(err);
+          callback.call(this, err);
+          return;
+        }
+        callback.call(this);
+      });
+    });
+  }
+
+  function isDirty(callback) {
+    var origin = getOrigin();
+
+    origin.getRef('heads/master', function(err, masterSha) {
+      if (err) {
+        console.error(err);
+        callback.call(this, err);
+        return;
+      }
+      origin.getRef('heads/' + workBranch, function(err, workSha) {
+        if (err) {
+          console.error(err);
+          callback.call(this, err);
+          return;
+        }
+        callback.call(this, null, masterSha != workSha);
+      });
+    });
+  }
+
+  function isSynced(callback) {
+    var origin = getOrigin();
+    var upstream = getUpstream();
+
+    origin.getRef('heads/master', function(err, originSha) {
+      if (err) {
+        console.error(err);
+        callback.call(this, err);
+        return;
+      }
+      upstream.getRef('heads/master', function(err, upstreamSha) {
+        if (err) {
+          console.error(err);
+          callback.call(this, err);
+          return;
+        }
+        callback.call(this, null, originSha == upstreamSha);
+      });
+    });
+  }
+
+  function createPullBranch(callback) {
+    var repo = getOrigin();
+    repo.listBranches(function(err, branches) {
+      if (err) {
+        console.error(err);
+        callback.call(err);
+        return;
+      }
+      var maxNum = 0;
+      var regex = /^pull(\d+)$/;
+      branches.forEach(function(branch) {
+        var match = regex.exec(branch);
+        if (match) {
+          maxNum = Math.max(maxNum, parseInt(match[1]));
+        }
+      });
+      var branchName = 'pull' + (maxNum + 1);
+      repo.branch(workBranch, branchName, function(err) {
+        if (err) {
+          console.error(err);
+          callback.call(err);
+          return;
+        }
+        callback.call(this, null, branchName);
+      });
+    });
+  }
+
+  function init(callback) {
+    hasFork(function(forked) {
+      if (forked) {
+        isDirty(function(err, dirty) {
+          if (err) {
+            callback.call(err);
+            return;
+          }
+          if (dirty) {
+            callback.call(this);
+          } else {
+            isSynced(function(err, synced) {
+              if (err) {
+                callback.call(err);
+                return;
+              }
+              if (synced) {
+                callback.call(this);
+              } else {
+                var repo = getOrigin();
+                repo.deleteRepo(function(err) {
+                  if (err) {
+                    console.error(err);
+                    callback.call(err);
+                    return;
+                  }
+                  fork(callback);
+                });
+              }
+            });
+          }
+        });
+      } else {
+        fork(callback);
+      }
+    });
+  }
+
+  function lsPath(path, callback) {
+    var repo = getOrigin();
+    repo.contents(workBranch, path, function(err, contents) {
+      if (err) {
+        callback.call(this, err);
+      }
+      callback.call(this, null, contents);
+    });
+  }
+
+  function readFile(path, callback) {
+    var repo = getOrigin();
+    repo.read(workBranch, path, callback);
+  }
+
+  function writeFile(path, content, message, callback) {
+    var repo = getOrigin();
+    var options = {
+      author: {
+        name: 'geojson.io'
+      }
+    }
+    repo.write(workBranch, path, content, message, function(err) {
+      if (err) {
+        console.error(err);
+        callback.call(this, err);
+        return;
+      }
+      callback.call(this);
+    });
+  }
+
+  function pullRequest(callback) {
+    createPullBranch(function(err, branch) {
+      if (err) {
+        callback.call(this, err);
+        return;
+      }
+      var pull = {
+        body: 'Generated by geojson.io',
+        base: 'master',
+        head: context.storage.get('github_username') + ':' + branch
+      }
+      if (context.serie) {
+        pull.title = context.serie.name;
+      } else {
+        pull.title = branch;
+      }
+      var repo = getUpstream();
+      repo.createPullRequest(pull, function(err, pullRequest) {
+        if (err) {
+          console.error(err);
+          callback.call(this, err);
+          return;
+        }
+        // Recreate work branch
+        var origin = getOrigin();
+        origin.deleteRef('heads/' + workBranch, function(err) {
+          if (err) {
+            console.error(err);
+            callback.call(this, err);
+            return;
+          }
+          origin.branch(workBranch, function(err) {
+            if (err) {
+              console.error(err);
+              callback.call(this, err);
+              return;
+            }
+            callback.call(this);
+          });
+        });
+      });
+    });
+  }
+
+  return {
+    init: init,
+    lsPath: lsPath,
+    readFile: readFile,
+    writeFile: writeFile,
+    pullRequest: pullRequest
+  }
 }

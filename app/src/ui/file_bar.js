@@ -7,7 +7,13 @@ var shpwrite = require('shp-write'),
     githubBrowser = require('github-file-browser'),
     gistBrowser = require('gist-map-browser'),
     geojsonNormalize = require('geojson-normalize'),
-    wellknown = require('wellknown');
+    wellknown = require('wellknown'),
+    vex = require('vex-js'),
+    vexDialog = require('vex-js/js/vex.dialog.js'),
+    S = require('string'),
+    $ = require('jquery');
+
+require('jstree');
 
 var share = require('./share'),
     modal = require('./modal.js'),
@@ -15,8 +21,10 @@ var share = require('./share'),
     zoomextent = require('../lib/zoomextent'),
     readFile = require('../lib/readfile'),
     meta = require('../lib/meta.js'),
-    saver = require('../ui/saver.js'),
-    config = require('../config.js')(location.hostname);
+    serializer = require('../lib/serializer'),
+    loading = require('../ui/loading.js'),
+    config = require('../config.js')(location.hostname),
+    github = require('../source/github');
 
 /**
  * This module provides the file picking & status bar above the map interface.
@@ -26,9 +34,9 @@ var share = require('./share'),
 module.exports = function fileBar(context) {
 
     var shpSupport = typeof ArrayBuffer !== 'undefined';
-    var mapboxAPI = /a\.tiles\.mapbox.com/.test(L.mapbox.config.HTTP_URL);
-    var githubAPI = !!config.GithubAPI;
-    var githubBase = githubAPI ? config.GithubAPI + '/api/v3': 'https://api.github.com';
+    vex.defaultOptions.className = 'vex-theme-os';
+    vexDialog.defaultOptions.showCloseButton = true;
+    github = github(context);
 
     var exportFormats = [{
         title: 'GeoJSON',
@@ -57,18 +65,26 @@ module.exports = function fileBar(context) {
     function bar(selection) {
 
         var actions = [{
-            title: 'Save',
-            action: (mapboxAPI || githubAPI) ? saveAction : function() {},
-            children: exportFormats
+          title: 'Nová séria',
+          action: newSerie
         }, {
-            title: 'New',
-            action: function() {
-                window.open(window.location.origin +
-                    window.location.pathname + '#new');
-            }
+          title: 'Otvoriť sériu',
+          action: openSerie
         }, {
-            title: 'Meta',
-            action: function() {},
+          title: 'Uložiť',
+          action: saveWork
+        }, {
+          title: 'Publikovať',
+          action: publishWork
+        }, {
+          title: 'Import',
+          alt: 'GeoJSON, TopoJSON, KML, CSV, GPX and OSM XML supported',
+          action: blindImport
+        }, {
+          title: 'Export',
+          children: exportFormats
+        }, {
+            title: 'Nástroje',
             children: [
                 {
                     title: 'Add map layer',
@@ -96,78 +112,9 @@ module.exports = function fileBar(context) {
                             meta.clear(context);
                         }
                     }
-                }, {
-                    title: 'Random: Points',
-                    alt: 'Add random points to your map',
-                    action: function() {
-                        var response = prompt('Number of points (default: 100)');
-                        if (response === null) return;
-                        var count = parseInt(response, 10);
-                        if (isNaN(count)) count = 100;
-                        meta.random(context, count, 'point');
-                    }
-                }, {
-                    title: 'Add bboxes',
-                    alt: 'Add bounding box members to all applicable GeoJSON objects',
-                    action: function() {
-                        meta.bboxify(context);
-                    }
-                }, {
-                    title: 'Flatten Multi Features',
-                    alt: 'Flatten MultiPolygons, MultiLines, and GeometryCollections into simple geometries',
-                    action: function() {
-                        meta.flatten(context);
-                    }
                 }
             ]
         }];
-
-        if (mapboxAPI || githubAPI) {
-            actions.unshift({
-                title: 'Open',
-                children: [
-                    {
-                        title: 'File',
-                        alt: 'GeoJSON, TopoJSON, KML, CSV, GPX and OSM XML supported',
-                        action: blindImport
-                    }, {
-                        title: 'GitHub',
-                        alt: 'GeoJSON files in GitHub Repositories',
-                        authenticated: true,
-                        action: clickGitHubOpen
-                    }, {
-                        title: 'Gist',
-                        alt: 'GeoJSON files in GitHub Gists',
-                        authenticated: true,
-                        action: clickGist
-                    }
-                ]
-            });
-            actions[1].children.unshift({
-                    title: 'GitHub',
-                    alt: 'GeoJSON files in GitHub Repositories',
-                    authenticated: true,
-                    action: clickGitHubSave
-                }, {
-                    title: 'Gist',
-                    alt: 'GeoJSON files in GitHub Gists',
-                    authenticated: true,
-                    action: clickGistSave
-                });
-
-            if (mapboxAPI) actions.splice(3, 0, {
-                    title: 'Share',
-                    action: function() {
-                        context.container.call(share(context));
-                    }
-                });
-        } else {
-            actions.unshift({
-                title: 'Open',
-                alt: 'CSV, KML, GPX, and other filetypes',
-                action: blindImport
-            });
-        }
 
         var items = selection.append('div')
             .attr('class', 'inline')
@@ -193,30 +140,6 @@ module.exports = function fileBar(context) {
                 .attr('class', 'children')
                 .call(submenu(d.children));
         });
-
-        var name = selection.append('div')
-            .attr('class', 'name');
-
-        if (mapboxAPI || githubAPI) {
-            var filetype = name.append('a')
-                .attr('target', '_blank')
-                .attr('class', 'icon-file-alt');
-
-            var filename = name.append('span')
-                .attr('class', 'filename')
-                .text('unsaved');
-        }
-
-        function clickGistSave() {
-            if (d3.event) d3.event.preventDefault();
-            context.data.set({ type: 'gist' });
-            saver(context);
-        }
-
-        function saveAction() {
-            if (d3.event) d3.event.preventDefault();
-            saver(context);
-        }
 
         function sourceIcon(type) {
             if (type == 'github') return 'icon-github';
@@ -249,142 +172,269 @@ module.exports = function fileBar(context) {
             };
         }
 
-        context.dispatch.on('change.filebar', onchange);
+        function loadConfig(callback) {
+          github.readFile('client/src/config.js', function(err, data) {
+            loading.hide();
+            if (err) {
+              flash(context.container, 'Nastala neočakávaná chyba.');
+              return;
+            }
 
-        function clickGitHubOpen() {
-            if (!context.user.token()) return flash(context.container, 'You must authenticate to use this API.');
-
-            var m = modal(d3.select('div.geojsonio'));
-
-            m.select('.m')
-                .attr('class', 'modal-splash modal col6');
-
-            m.select('.content')
-                .append('div')
-                .attr('class', 'header pad2 fillD')
-                .append('h1')
-                .text('GitHub');
-
-            githubBrowser(context.user.token(), false, githubBase)
-                .open()
-                .onclick(function(d) {
-                    if (!d || !d.length) return;
-                    var last = d[d.length - 1];
-                    if (!last.path) {
-                        throw new Error('last is invalid: ' + JSON.stringify(last));
-                    }
-                    if (!last.path.match(/\.(geo)?json/i)) {
-                        return alert('only GeoJSON files are supported from GitHub');
-                    }
-                    if (last.type === 'blob') {
-                        githubBrowser.request('/repos/' + d[1].full_name +
-                            '/git/blobs/' + last.sha, function(err, blob) {
-                                d.content = JSON.parse(atob(blob[0].content));
-                                context.data.parse(d);
-                                zoomextent(context);
-                                m.close();
-                            });
-                    }
-                })
-                .appendTo(
-                    m.select('.content')
-                        .append('div')
-                        .attr('class', 'repos pad2')
-                        .node());
+            context.serie.configString = data;
+            context.serie.config = eval(data);
+            callback.call(this);
+          });
         }
 
-        function clickGitHubSave() {
-            if (!context.user.token()) return flash(context.container, 'You must authenticate to use this API.');
+        function newSerie() {
+          loading.show();
 
-            var m = modal(d3.select('div.geojsonio'));
+          context.serie = {};
 
-            m.select('.m')
-                .attr('class', 'modal-splash modal col6');
+          loadConfig(function() {
+            var areas = new Set();
+            context.serie.config.series.forEach(function(serie) {
+              var area = serie.title.split(':', 1)[0].trim();
+              areas.add(area);
+            });
+            newSerieDialog(areas);
+          });
+        }
 
-            m.select('.content')
-                .append('div')
-                .attr('class', 'header pad2 fillD')
-                .append('h1')
-                .text('GitHub');
+        function newSerieDialog(areas) {
+          var input = '<label for="input-name">Názov novej série</label>'
+                    + '<input id="input-name" name="name" type="text" required />'
+                    + '<div class="radio-box"><div class="title">Názov oblasti, do ktorej séria spadá</div>'
+                    + '<div class="vertical-scroll">'
 
-            githubBrowser(context.user.token(), true, githubBase)
-                .open()
-                .onclick(function(d) {
-                    if (!d || !d.length) return;
-                    var last = d[d.length - 1];
-                    if (last.type === 'new') {
-                        var filename = prompt('New file name');
-                        if (!filename) {
-                            m.close();
-                            return;
-                        }
-                        var pathparts = d.slice(3);
-                        pathparts.pop();
-                        pathparts.push({ path: filename });
-                        var partial = pathparts.map(function(p) {
-                            return p.path;
-                        }).join('/');
-                        context.data.set({
-                            source: {
-                                url: githubBase + '/repos/' +
-                                    d[0].login + '/' + d[1].name +
-                                        '/contents/' + partial +
-                                        '?ref=' + d[2].name
-                            },
-                            type: 'github',
-                            meta: {
-                                branch: d[2].name,
-                                login: d[0].login,
-                                repo: d[1].name
-                            }
-                        });
-                        context.data.set({ newpath: partial + filename });
-                        m.close();
-                        saver(context);
-                    } else {
-                        alert('overwriting existing files is not yet supported');
+          var first = true;
+          areas.forEach(function(area) {
+            if (first) {
+              first = false;
+              input += '<input type="radio" name="area" checked="true" value="' + area + '"/><span>' + area + '</span></br>';
+            } else {
+              input += '<input type="radio" name="area" value="' + area + '"/><span>' + area + '</span></br>';
+            }
+          });
+          input += '</div><span class="other"><input id="radio-area-other" type="radio" name="area" value="&lt;other&gt;"/><input id="input-area-other" type="text" name="area-other" placeholder="Iná" /></span></div>';
+          vexDialog.open({
+            message: 'Vytvorenie novej série',
+            input: input,
+            afterOpen: function() {
+              var inputAreaOther = document.getElementById('input-area-other');
+              inputAreaOther.addEventListener('focus', function() {
+                document.getElementById('radio-area-other').checked = true;
+              });
+            },
+            callback: function(data) {
+              if (!data) {
+                return;
+              }
+              var area = data.area;
+              if (area == '<other>') {
+                area = data['area-other'];
+              }
+              var sname = S(data.name).slugify().s;
+              context.serie.name = data.name;
+              context.serie.filename = S(data.area + ' ' + data.name).slugify().s;
+              context.serie.area = area;
+
+              var serie = {
+                title: area + ': ' + data.name,
+                layer: context.serie.filename,
+                template: context.serie.filename + '.txt',
+                formatFunctions: context.serie.config.formatFunctionsTemplate
+              };
+              context.serie.config.series.push(serie);
+              context.serie.configString = 'var mapseries = {};\nmapseries.config = ' + serializer(context.serie.config);
+
+              github.lsPath('data', function(err, paths) {
+                if (!err) {
+                  if (!paths) {
+                    return;
+                  }
+                  var found = false;
+                  paths.forEach(function(path) {
+                    if (path.name == context.serie.filename + '.json') {
+                      found = true;
+                      return;
                     }
-                })
-                .appendTo(
-                    m.select('.content')
-                        .append('div')
-                        .attr('class', 'repos pad2')
-                        .node());
+                  });
+                  if (found) {
+                    flash(context.container, 'Séria s názvom ' + context.serie.filename + '.json' + ' už existuje.');
+                    return;
+                  }
+                }
+                meta.clear(context);
+                context.editor.openTab('geojson', 'geojson', null, false);
+                github.readFile('client/src/templates/template.txt', function(err, data) {
+                  if (err) {
+                    console.error(err);
+                    flash(context.container, 'Nastala neočakávaná chyba.');
+                    return;
+                  }
+                  context.editor.openTab('template', 'javascript', data, false);
+                  github.readFile('client/src/config.js', function(err, data) {
+                    if (err) {
+                      console.error(err);
+                      flash(context.container, 'Nastala neočakávaná chyba.');
+                      return;
+                    }
+                    context.editor.openTab('config', 'javascript', context.serie.configString, true);
+                  });
+                });
+
+              });
+            }
+          });
         }
 
-        function clickGist() {
-            if (!context.user.token()) return flash(context.container, 'You must authenticate to use this API.');
+        function openSerie() {
+          context.serie = {};
 
-            var m = modal(d3.select('div.geojsonio'));
-
-            m.select('.m')
-                .attr('class', 'modal-splash modal col6');
-
-            gistBrowser(context.user.token(), githubBase)
-                .open()
-                .onclick(function(d) {
-                    context.data.parse(d);
-                    zoomextent(context);
-                    m.close();
-                })
-                .appendTo(
-                    m.select('.content')
-                        .append('div')
-                        .attr('class', 'repos pad2')
-                        .node());
+          loadConfig(function() {
+            var series = {};
+            context.serie.config.series.forEach(function(serie) {
+              var tmp = serie.title.split(':');
+              var area = tmp.splice(0, 1);
+              var name = tmp.join(':');
+              series[area] = series[area] || [];
+              series[area].push({
+                name: name,
+                layer: serie.layer
+              });
+            });
+            openSerieDialog(series);
+          });
         }
 
-        function onchange(d) {
-            var data = d.obj,
-                type = data.type,
-                path = data.path;
-            if (mapboxAPI || githubAPI) filename
-                .text(path ? path : 'unsaved')
-                .classed('deemphasize', context.data.dirty);
-            if (mapboxAPI || githubAPI) filetype
-                .attr('href', data.url)
-                .attr('class', sourceIcon(type));
-            saveNoun(type == 'github' ? 'Commit' : 'Save');
+        function openSerieDialog(series) {
+          seriesTree = [];
+          for (var area in series) {
+            var names = series[area];
+            names.forEach(function(name, i, arr) {
+              arr[i] = {
+                text: name.name,
+                icon: 'jstree-file',
+                layer: name.layer
+              };
+            });
+            seriesTree.push({
+              text: area,
+              children: names
+            });
+          }
+
+          vexDialog.open({
+            message: 'Otvoriť existujúcu sériu',
+            input: '<div id="file-tree"></div>',
+            contentCSS: {
+              width: '600px'
+            },
+            buttons: [],
+            afterOpen: function() {
+              var _this = this;
+              $('#file-tree').jstree({
+                core: {
+                  data: seriesTree
+                }
+              }).on('changed.jstree', function(e, data) {
+                if (data.node.parent != '#') {
+                  var parent = data.instance.get_node(data.node.parent);
+                  vex.close(_this.id);
+                  doOpen(data.node.original.layer);
+                }
+              });
+            }
+          });
+        }
+
+        function doOpen(serie, callback) {
+          loading.show();
+          var errmsg = 'Nastala neočakávaná chyba.';
+          var geojsonPath = 'data/' + serie + '.json';
+          var templatePath = 'client/src/templates/' + serie + '.txt';
+
+          github.readFile(geojsonPath, function(err, data) {
+            if (err) {
+              loading.hide();
+              console.error(err);
+              flash(context.container, errmsg);
+              return;
+            }
+            context.editor.openTab('geojson', 'geojson', data, false);
+            github.readFile(templatePath, function(err, data) {
+              loading.hide();
+              if (err) {
+                console.error(err);
+                flash(context.container, errmsg);
+                return;
+              }
+              context.editor.openTab('template', 'javascript', data, false);
+              context.editor.openTab('config', 'javascript', context.serie.configString, true);
+            });
+          });
+        }
+
+        function doSaveWork(callback) {
+          var geojson = context.editor.getTab('geojson').content;
+          var template = context.editor.getTab('template').content;
+          var config = context.editor.getTab('config').content;
+
+          var geojsonPath = 'data/' + context.serie.filename + '.json';
+          var templatePath = 'client/src/templates/' + context.serie.filename + '.txt';
+          var configPath = 'client/src/config.js';
+
+          github.writeFile(geojsonPath, geojson, 'Updated ' + geojsonPath, function(err) {
+            if (err) {
+              callback.call(this, err);
+              return;
+            }
+            github.writeFile(templatePath, template, 'Updated ' + templatePath, function(err) {
+              if (err) {
+                callback.call(this, err);
+                return;
+              }
+              github.writeFile(configPath, config, 'Updated ' + configPath, function(err) {
+                if (err) {
+                  callback.call(this, err);
+                  return;
+                }
+                callback.call(this);
+              });
+            });
+          });
+        }
+
+        function saveWork() {
+          loading.show();
+          doSaveWork(function(err) {
+            loading.hide();
+            if (err) {
+              flash(context.container, 'Uloženie zlyhalo. Nastala neočakávaná chyba.');
+            } else {
+              flash(context.container, 'Úspešne uložené.');
+            }
+          });
+        }
+
+        function publishWork() {
+          loading.show();
+          doSaveWork(function(err) {
+            if (err) {
+              loading.hide();
+              flash(context.container, 'Publikovanie zlyhalo. Nastala neočakávaná chyba.');
+              return;
+            }
+            github.pullRequest(function(err) {
+              loading.hide();
+              if (err) {
+                flash(context.container, 'Publikovanie zlyhalo. Nastala neočakávaná chyba.');
+              } else {
+                flash(context.container, 'Úspešne publikované.');
+              }
+            });
+          });
         }
 
         function blindImport() {
@@ -423,14 +473,6 @@ module.exports = function fileBar(context) {
                 zoomextent(context);
             }
         }
-
-        d3.select(document).call(
-            d3.keybinding('file_bar')
-                .on('⌘+o', function() {
-                    blindImport();
-                    d3.event.preventDefault();
-                })
-                .on('⌘+s', saveAction));
     }
 
     function downloadTopo() {

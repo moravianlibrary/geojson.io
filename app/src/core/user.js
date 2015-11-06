@@ -45,7 +45,7 @@ module.exports = function(context) {
     user.authenticate = function() {
         window.location.href = (config.GithubAPI || 'https://github.com') + '/login/oauth/authorize?client_id=' +
             config.client_id +
-            '&scope=gist,repo';
+            '&scope=gist,repo,delete_repo';
     };
 
     user.token = function(callback) {

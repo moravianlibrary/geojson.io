@@ -7,6 +7,7 @@ var buttons = require('./ui/mode_buttons'),
 module.exports = ui;
 
 function ui(context) {
+
     function init(selection) {
 
         var container = selection
@@ -62,10 +63,12 @@ function ui(context) {
             .attr('class', 'user fr pad1 deemphasize')
             .call(userUi(context));
 
+        context.editor = buttons(context, pane);
+
         top
             .append('div')
             .attr('class', 'buttons')
-            .call(buttons(context, pane));
+            .call(context.editor.update);
 
         container
             .append('div')
@@ -74,7 +77,6 @@ function ui(context) {
 
         dnd(context);
     }
-
 
     return {
         read: init,

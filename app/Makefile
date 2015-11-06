@@ -38,7 +38,7 @@ dist/d3.js: node_modules node_modules/d3/*
 dist/d3.min.js: dist/d3.js
 	$(UGLIFY) dist/d3.js > dist/d3.min.js
 
-dist/lib.js: dist dist/d3.js $(LIBS)
+dist/lib.js: dist dist/d3.js lib/label/dist/leaflet.label.js $(LIBS)
 	cat dist/d3.js \
 		lib/hashchange.js \
 		lib/blob.js \
@@ -53,7 +53,11 @@ dist/lib.js: dist dist/d3.js $(LIBS)
 		lib/codemirror/mode/javascript/javascript.js \
 		lib/leaflet.geometryutil.js \
 		lib/leaflet.snap.js \
-		lib/leaflet.draw.topology.js > dist/lib.js
+		lib/leaflet.draw.topology.js \
+		lib/label/dist/leaflet.label-src.js > dist/lib.js
+
+lib/label/dist/leaflet.label.js:
+	cd lib/label && jake
 
 dist/delegate.js: src/delegate.js
 	$(BROWSERIFY)  src/delegate.js > dist/delegate.js

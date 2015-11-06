@@ -1,6 +1,8 @@
 var qs = require('qs-hash'),
     zoomextent = require('../lib/zoomextent'),
-    flash = require('../ui/flash');
+    flash = require('../ui/flash'),
+    loading = require('../ui/loading'),
+    github = require('../source/github');
 
 module.exports = function(context) {
 
@@ -61,6 +63,12 @@ module.exports = function(context) {
     }
 
     return function(query) {
+        if (context.storage.get('github_token')) {
+          loading.show();
+          github(context).init(function() {
+            loading.hide();
+          });
+        }
         if (!query.id && !query.data) return;
 
         var oldRoute = d3.event ? qs.stringQs(d3.event.oldURL.split('#')[1]).id :
