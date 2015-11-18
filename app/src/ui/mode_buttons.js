@@ -9,22 +9,12 @@ module.exports = function(context, pane) {
   var tabs = [];
   var idCounter = 0;
 
-  // var buttonData = [{
-  //     icon: 'code',
-  //     title: ' JSON',
-  //     alt: 'JSON Source',
-  //     behavior: json
-  // }, {
-  //     icon: 'table',
-  //     title: ' Table',
-  //     alt: 'Edit feature properties in a table',
-  //     behavior: table
-  // }, {
-  //     icon: 'question',
-  //     title: ' Help',
-  //     alt: 'Help',
-  //     behavior: help
-  // }];
+  context.dispatch.on('clear.tabs', function() {
+    if (mode) mode.off();
+    tabs = [];
+    update();
+    pane.html('');
+  });
 
   function update(s) {
     selection = s || selection;

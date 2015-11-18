@@ -244,7 +244,7 @@ module.exports = function(context, config) {
         head: context.storage.get('github_username') + ':' + branch
       }
       if (context.serie) {
-        pull.title = context.serie.name;
+        pull.title = context.serie.area + ': ' + context.serie.name;
       } else {
         pull.title = branch;
       }

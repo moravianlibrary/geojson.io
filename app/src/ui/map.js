@@ -40,11 +40,9 @@ module.exports = function(context, readonly) {
               edit: { featureGroup: context.mapLayer },
               draw: {
                   circle: false,
-                  polyline: { metric: (navigator.language !== 'en-us' && navigator.language !== 'en-US'), guideLayers: [context.mapLayer] },
+                  polyline: false,
                   polygon: { metric: (navigator.language !== 'en-us' && navigator.language !== 'en-US'), guideLayers: [context.mapLayer], snapDistance: 5 },
-                  marker: {
-                      icon: L.mapbox.marker.icon({})
-                  }
+                  marker: false
               }
           }).addTo(context.map);
 
@@ -200,7 +198,6 @@ function bindPopup(l) {
 }
 
 function bindLabel(l, layer) {
-  console.log('bindLabel');
   var props = JSON.parse(JSON.stringify(l.toGeoJSON().properties)),
       properties = {};
 
@@ -212,7 +209,7 @@ function bindLabel(l, layer) {
 
   if (properties['ID']) {
     var label = new L.Label({direction: 'center'});
-    label.setContent(properties['ID']);
+    label.setContent(properties['SHEET']);
     label.setLatLng(l.getBounds().getCenter());
     layer.addLayer(label);
   }

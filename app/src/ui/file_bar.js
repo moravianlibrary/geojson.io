@@ -342,6 +342,8 @@ module.exports = function fileBar(context) {
                 if (data.node.parent != '#') {
                   var parent = data.instance.get_node(data.node.parent);
                   vex.close(_this.id);
+                  context.serie.area = parent.text;
+                  context.serie.name = data.node.text;
                   doOpen(data.node.original.layer);
                 }
               });
@@ -349,8 +351,11 @@ module.exports = function fileBar(context) {
           });
         }
 
-        function doOpen(serie, callback) {
+        function doOpen(serie) {
           loading.show();
+
+          context.serie.filename = serie;
+
           var errmsg = 'Nastala neočakávaná chyba.';
           var geojsonPath = 'data/' + serie + '.json';
           var templatePath = 'client/src/templates/' + serie + '.txt';
@@ -423,7 +428,7 @@ module.exports = function fileBar(context) {
           doSaveWork(function(err) {
             if (err) {
               loading.hide();
-              flash(context.container, 'Publikovanie zlyhalo. Nastala neočakávaná chyba.');
+              flash(context.container, 'Ukladanie zlyhalo. Nastala neočakávaná chyba.');
               return;
             }
             github.pullRequest(function(err) {
@@ -432,6 +437,7 @@ module.exports = function fileBar(context) {
                 flash(context.container, 'Publikovanie zlyhalo. Nastala neočakávaná chyba.');
               } else {
                 flash(context.container, 'Úspešne publikované.');
+                context.dispatch.clear();
               }
             });
           });

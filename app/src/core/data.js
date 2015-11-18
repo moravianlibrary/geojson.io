@@ -45,6 +45,10 @@ module.exports = function(context) {
 
     var data = {};
 
+    context.dispatch.on('clear.data', function() {
+      data.clear();
+    });
+
     data.hasFeatures = function() {
         return !!(_data.map && _data.map.features && _data.map.features.length);
     };
